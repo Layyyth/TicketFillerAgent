@@ -42,8 +42,34 @@ def setup_huggingface_login():
             print(f"Login failed: {e}")
             print("Continuing without login (may fail if model requires authentication)...")
 
+def check_gpu_compatibility():
+    """Check GPU compatibility and provide solutions."""
+    if not torch.cuda.is_available():
+        print("⚠️ CUDA not available. Training will use CPU (very slow).")
+        return False
+    
+    print(f"✓ CUDA available: {torch.cuda.get_device_name()}")
+    print(f"✓ CUDA version: {torch.version.cuda}")
+    print(f"✓ GPU memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+    
+    # Check for compatibility issues
+    gpu_name = torch.cuda.get_device_name().lower()
+    if "blackwell" in gpu_name or "rtx pro 6000" in gpu_name:
+        print("⚠️ Detected RTX Pro 6000 Blackwell GPU")
+        print("⚠️ This GPU may have CUDA compatibility issues with current PyTorch")
+        print("💡 Solutions:")
+        print("   1. Install PyTorch with CUDA 12.4+ support")
+        print("   2. Use CPU training (slower but compatible)")
+        print("   3. Use a different GPU if available")
+        return False
+    
+    return True
+
 # Setup Hugging Face login
 setup_huggingface_login()
+
+# Check GPU compatibility
+check_gpu_compatibility()
 
 # Configuration
 MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2"  # Commercial-friendly license
@@ -487,28 +513,61 @@ def evaluate_model(model, tokenizer, test_samples: List[Dict], output_dir: str):
 
 def prepare_model_and_tokenizer():
     """Prepare model with 4-bit quantization and LoRA."""
+    # Check if we should use CPU due to compatibility issues
+    use_cpu = False
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name().lower()
+        if "blackwell" in gpu_name or "rtx pro 6000" in gpu_name:
+            print("⚠️ Detected incompatible GPU, falling back to CPU training")
+            use_cpu = True
+    
     # Quantization config for efficient training
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16
-    )
+    if not use_cpu:
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16
+        )
+    else:
+        bnb_config = None
+        print("⚠️ Using CPU training - this will be much slower!")
     
     # Load model and tokenizer
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_NAME,
-        quantization_config=bnb_config,
-        device_map="auto",
-        trust_remote_code=True
-    )
+    try:
+        if use_cpu:
+            model = AutoModelForCausalLM.from_pretrained(
+                MODEL_NAME,
+                device_map="cpu",
+                trust_remote_code=True,
+                torch_dtype=torch.float32
+            )
+        else:
+            model = AutoModelForCausalLM.from_pretrained(
+                MODEL_NAME,
+                quantization_config=bnb_config,
+                device_map="auto",
+                trust_remote_code=True
+            )
+    except RuntimeError as e:
+        if "CUDA" in str(e) or "kernel image" in str(e):
+            print("⚠️ CUDA error detected, falling back to CPU training")
+            model = AutoModelForCausalLM.from_pretrained(
+                MODEL_NAME,
+                device_map="cpu",
+                trust_remote_code=True,
+                torch_dtype=torch.float32
+            )
+        else:
+            raise e
     
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
     
-    # Prepare model for k-bit training
-    model = prepare_model_for_kbit_training(model)
+    # Prepare model for k-bit training (skip if using CPU)
+    if not use_cpu:
+        model = prepare_model_for_kbit_training(model)
     
     # LoRA configuration
     lora_config = LoraConfig(
@@ -668,26 +727,52 @@ def train_model(json_path: Optional[str] = None, csv_path: Optional[str] = None,
         datasets, test_samples = create_datasets(samples, tokenizer)
     
     # Training arguments
-    training_args = TrainingArguments(
-        output_dir=OUTPUT_DIR,
-        num_train_epochs=NUM_EPOCHS,
-        per_device_train_batch_size=BATCH_SIZE,
-        per_device_eval_batch_size=BATCH_SIZE,
-        gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,
-        warmup_steps=WARMUP_STEPS,
-        learning_rate=LEARNING_RATE,
-        logging_steps=10,
-        save_steps=500,
-        eval_steps=100,
-        evaluation_strategy="steps",
-        save_strategy="steps",
-        load_best_model_at_end=True,
-        report_to="tensorboard",
-        fp16=True,
-        gradient_checkpointing=True,
-        optim="paged_adamw_8bit",
-        lr_scheduler_type="cosine",
-    )
+    # Adjust batch size for CPU training
+    if torch.cuda.is_available() and not any(x in torch.cuda.get_device_name().lower() for x in ["blackwell", "rtx pro 6000"]):
+        # GPU training
+        training_args = TrainingArguments(
+            output_dir=OUTPUT_DIR,
+            num_train_epochs=NUM_EPOCHS,
+            per_device_train_batch_size=BATCH_SIZE,
+            per_device_eval_batch_size=BATCH_SIZE,
+            gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,
+            warmup_steps=WARMUP_STEPS,
+            learning_rate=LEARNING_RATE,
+            logging_steps=10,
+            save_steps=500,
+            eval_steps=100,
+            evaluation_strategy="steps",
+            save_strategy="steps",
+            load_best_model_at_end=True,
+            report_to="tensorboard",
+            fp16=True,
+            gradient_checkpointing=True,
+            optim="paged_adamw_8bit",
+            lr_scheduler_type="cosine",
+        )
+    else:
+        # CPU training - smaller batch sizes, no fp16
+        print("⚠️ Using CPU-optimized training settings")
+        training_args = TrainingArguments(
+            output_dir=OUTPUT_DIR,
+            num_train_epochs=NUM_EPOCHS,
+            per_device_train_batch_size=1,  # Much smaller for CPU
+            per_device_eval_batch_size=1,
+            gradient_accumulation_steps=16,  # Larger accumulation to compensate
+            warmup_steps=WARMUP_STEPS,
+            learning_rate=LEARNING_RATE,
+            logging_steps=10,
+            save_steps=500,
+            eval_steps=100,
+            evaluation_strategy="steps",
+            save_strategy="steps",
+            load_best_model_at_end=True,
+            report_to="tensorboard",
+            fp16=False,  # No fp16 on CPU
+            gradient_checkpointing=False,  # No gradient checkpointing on CPU
+            optim="adamw_torch",  # Standard optimizer for CPU
+            lr_scheduler_type="cosine",
+        )
     
     # Initialize trainer
     trainer = SFTTrainer(

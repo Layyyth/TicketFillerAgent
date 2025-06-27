@@ -153,6 +153,21 @@ The model evaluation provides:
 - **Storage**: 50GB+ free space
 - **Python**: 3.8+
 
+### ⚠️ CUDA Compatibility Issues
+
+**RTX Pro 6000 Blackwell GPU Users:**
+- This GPU uses CUDA capability `sm_120` which may not be supported by current PyTorch versions
+- The script will automatically fall back to CPU training if GPU compatibility issues are detected
+- For GPU training, try installing PyTorch with CUDA 12.4+ support:
+  ```bash
+  python fix_cuda_installation.py
+  ```
+
+**Alternative Solutions:**
+1. **CPU Training**: Slower but guaranteed to work
+2. **Different GPU**: Use RTX 4090, A100, V100, or other compatible GPUs
+3. **Cloud Platforms**: Google Colab, AWS, or other cloud services with compatible GPUs
+
 ## Performance
 
 With the current configuration:
