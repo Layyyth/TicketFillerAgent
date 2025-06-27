@@ -18,6 +18,32 @@ from trl import SFTTrainer
 import pandas as pd
 from typing import Dict, List, Optional
 import re
+import os
+
+# Hugging Face login
+def setup_huggingface_login():
+    """Setup Hugging Face login for model downloads and uploads."""
+    from huggingface_hub import login
+    
+    # Check if HF_TOKEN environment variable is set
+    hf_token = os.getenv('HF_TOKEN')
+    
+    if hf_token:
+        print("Using HF_TOKEN environment variable for Hugging Face login...")
+        login(token=hf_token)
+    else:
+        print("HF_TOKEN environment variable not found.")
+        print("You can either:")
+        print("1. Set HF_TOKEN environment variable: export HF_TOKEN=your_token_here")
+        print("2. Or login interactively when prompted")
+        try:
+            login()
+        except Exception as e:
+            print(f"Login failed: {e}")
+            print("Continuing without login (may fail if model requires authentication)...")
+
+# Setup Hugging Face login
+setup_huggingface_login()
 
 # Configuration
 MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2"  # Commercial-friendly license
@@ -543,6 +569,31 @@ def create_datasets(samples: List[Dict], tokenizer, train_ratio: float = 0.8, va
         "test": format_dataset(test_samples)
     }), test_samples  # Return test_samples for evaluation
 
+def upload_model_to_hub(model, tokenizer, output_dir: str, model_name: str = "banking-ticket-classifier"):
+    """Upload the trained model to Hugging Face Hub."""
+    try:
+        from huggingface_hub import HfApi
+        
+        print(f"\nUploading model to Hugging Face Hub as '{model_name}'...")
+        
+        # Push to hub
+        model.push_to_hub(model_name)
+        tokenizer.push_to_hub(model_name)
+        
+        print(f"✓ Model successfully uploaded to: https://huggingface.co/{model_name}")
+        
+        # Also save locally
+        model.save_pretrained(output_dir)
+        tokenizer.save_pretrained(output_dir)
+        print(f"✓ Model also saved locally to: {output_dir}")
+        
+    except Exception as e:
+        print(f"⚠️ Failed to upload to Hub: {e}")
+        print("Model saved locally only.")
+        # Ensure local save
+        model.save_pretrained(output_dir)
+        tokenizer.save_pretrained(output_dir)
+
 def train_model(json_path: Optional[str] = None, csv_path: Optional[str] = None, 
                 data_dir: Optional[str] = None, use_synthetic: bool = True):
     """Main training function."""
@@ -664,6 +715,9 @@ def train_model(json_path: Optional[str] = None, csv_path: Optional[str] = None,
     # Evaluate on test set
     print("\nEvaluating model on test set...")
     accuracy, results = evaluate_model(model, tokenizer, test_samples, OUTPUT_DIR)
+    
+    # Upload model to Hugging Face Hub
+    upload_model_to_hub(model, tokenizer, OUTPUT_DIR)
     
     return accuracy
 

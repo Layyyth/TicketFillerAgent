@@ -41,7 +41,21 @@ The model generates tickets with the following structure:
 pip install -r requirements.txt
 ```
 
-2. Verify the installation:
+2. **Setup Hugging Face Login** (Required for model downloads):
+   
+   **Option A: Using Environment Variable (Recommended)**
+   ```bash
+   export HF_TOKEN=your_huggingface_token_here
+   ```
+   
+   **Option B: Interactive Login**
+   ```bash
+   python -c "from huggingface_hub import login; login()"
+   ```
+   
+   Get your token from: https://huggingface.co/settings/tokens
+
+3. Verify the installation:
 ```bash
 python test_code.py
 ```
