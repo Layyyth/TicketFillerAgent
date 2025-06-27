@@ -1,0 +1,32 @@
+=== Banking Ticket Data Quality Report ===
+
+Total Records: 19954
+Unique Ticket Types: 3
+Unique Severities: 4
+
+Missing Values:
+  Assistance Request: 19873 (99.59%)
+
+Ticket Type Distribution:
+  complaint: 10487 (52.56%)
+  inquiry: 7551 (37.84%)
+  assistance: 1916 (9.60%)
+
+Severity Distribution:
+  high: 9515 (47.68%)
+  low: 5557 (27.85%)
+  medium: 4855 (24.33%)
+  critical: 27 (0.14%)
+
+Department Distribution:
+  Customer Service: 19954 (100.00%)
+
+Input Length Analysis:
+  Mean: 63.61 characters
+  Median: 63.00 characters
+  Min: 24 characters
+  Max: 172 characters
+  Std Dev: 15.10 characters
+
+Potential Data Quality Issues:
+  - 17431 duplicate inputs found
