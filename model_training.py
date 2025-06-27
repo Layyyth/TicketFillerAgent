@@ -82,7 +82,7 @@ def setup_huggingface_login():
             print(f"Login failed: {e}. Model deployment will fail.")
 
 def check_gpu_compatibility():
-    """Check GPU compatibility and provide informational warnings."""
+    """Check GPU compatibility. Assumes A100 is target."""
     if not torch.cuda.is_available():
         print("❌ CRITICAL: CUDA not available. This script requires a GPU.")
         raise SystemExit("CUDA is not available. Please check your installation.")
@@ -91,13 +91,8 @@ def check_gpu_compatibility():
     print(f"✓ CUDA version: {torch.version.cuda}")
     print(f"✓ GPU memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
     
-    gpu_name = torch.cuda.get_device_name()
-    if "RTX 6000 Ada Generation" in gpu_name or "RTX PRO 6000" in gpu_name:
-        print("✅ Detected NVIDIA RTX 6000 Ada Generation GPU.")
-        print("   Ensure you are using PyTorch 2.1+ with CUDA 12.1+ for optimal performance.")
-    
-    if torch.cuda.get_device_capability()[0] < 8:
-        print("⚠️ Warning: GPU architecture is older than Ampere. Flash Attention 2 may not be supported.")
+    # No specific warnings for A100 as it's a well-supported GPU for ML.
+    # Flash Attention 2 is compatible with Ampere (A100) architecture.
 
 def create_training_prompt(example: Dict, tokenizer) -> str:
     """
@@ -212,14 +207,15 @@ def generate_synthetic_data() -> List[Dict]:
     return edge_cases
 
 def prepare_model_and_tokenizer():
-    """Prepare model with 4-bit quantization, LoRA, and Flash Attention."""
+    """Prepare model with 4-bit quantization, LoRA, and Flash Attention, optimized for A100."""
     print("Preparing model and tokenizer...")
 
+    # Quantization config using FP16 compute dtype for A100
     quantization_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_use_double_quant=True,
         bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16
+        bnb_4bit_compute_dtype=torch.float16 # Changed to float16 for A100 efficiency
     )
 
     model = AutoModelForCausalLM.from_pretrained(
@@ -227,7 +223,7 @@ def prepare_model_and_tokenizer():
         quantization_config=quantization_config,
         device_map="auto",
         trust_remote_code=True,
-        attn_implementation="flash_attention_2"  # Use Flash Attention 2 for speed
+        attn_implementation="flash_attention_2"  # Use Flash Attention 2 for speed (compatible with A100)
     )
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
@@ -293,7 +289,7 @@ def train_model(model, tokenizer, datasets):
         save_steps=500,
         load_best_model_at_end=True,
         report_to="tensorboard",
-        bf16=True,
+        fp16=True, # Changed to FP16 for A100 efficiency (was bf16 for RTX Pro 6000)
         gradient_checkpointing=True,
         optim="paged_adamw_8bit",
         lr_scheduler_type="cosine",
